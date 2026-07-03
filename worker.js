@@ -4,7 +4,7 @@
  * Paste this into a Cloudflare Worker, bind your D1 database as `DB`,
  * set a secret named `ADMIN_TOKEN`, and open the Worker URL.
  *
- * https://github.com/YOUR_USERNAME/d1-admin
+ * https://github.com/amirmahdavi2023/d1-admin
  * License: MIT
  */
 
