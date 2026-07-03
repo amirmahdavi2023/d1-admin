@@ -4,7 +4,7 @@ A single-file admin panel for [Cloudflare D1](https://developers.cloudflare.com/
 
 Paste one file into a Worker, bind your database, done.
 
-![screenshot](screenshot.png)
+![screenshot](screenshot.jpg)
 
 ## Why
 
