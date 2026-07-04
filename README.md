@@ -1,5 +1,7 @@
 # D1 Admin
 
+[![tests](https://github.com/amirmahdavi2023/d1-admin/actions/workflows/test.yml/badge.svg)](https://github.com/amirmahdavi2023/d1-admin/actions/workflows/test.yml)
+
 **Manage your Cloudflare D1 databases from any browser — including your phone. No CLI, no build step, no dependencies.**
 
 One file. Paste it into a Worker in the Cloudflare dashboard, bind your database, done. If you can open a browser, you can run this — no laptop, no terminal, no `wrangler` required.
@@ -22,8 +24,9 @@ Your data never touches a third-party service: the panel runs as a Worker inside
 - Run any SQL statement — reads and writes — with timing and row counts
 - Mobile-first UI that's actually pleasant on a small screen
 - Token auth with constant-time comparison; token stored only in your browser
-- Rejects multi-statement queries (string-literal safe) — one statement at a time, by design
-- Zero dependencies, zero build step, one file, ~450 lines of readable JavaScript
+- Rejects multi-statement input with a clear error instead of D1's silent truncation — and does it correctly: semicolons inside string literals, quoted identifiers, and comments don't trip it, and a trailing `;` (even followed by a comment) is fine
+- Zero dependencies, zero build step, one file of readable JavaScript
+- The tricky part (SQL statement detection) is covered by [tests](test.mjs) that run in CI on every push
 
 ## Setup (2 minutes, entirely in the dashboard)
 
@@ -39,7 +42,7 @@ That's the whole install. Steps 1–5 work fine from a phone browser.
 
 - Anyone with the token has **full read/write access** to the database. Use a long random token and treat it like a password.
 - The panel executes raw SQL by design — that's the point of an admin tool. Don't share the URL+token combination.
-- Multi-statement input (`SELECT 1; DROP TABLE …`) is rejected server-side; the parser correctly skips semicolons inside string literals, quoted identifiers, and comments.
+- Multi-statement input (`SELECT 1; DROP TABLE …`) is rejected server-side with an explicit error. Note that D1 itself would only run the first statement and silently drop the rest — the check here exists so you find out instead of assuming everything ran.
 - For extra protection, put the Worker behind [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/) (free for up to 50 users).
 
 ## Limitations (v1)
@@ -47,6 +50,16 @@ That's the whole install. Steps 1–5 work fine from a phone browser.
 - One SQL statement per run (D1 `prepare().all()` semantics)
 - Table preview is capped at 100 rows — use `LIMIT`/`OFFSET` for paging
 - No CSV export, no schema editor yet — see issues for the roadmap
+
+## Development
+
+No toolchain needed to use it — but if you're contributing, the statement validator has a dependency-free test suite:
+
+```
+node test.mjs
+```
+
+GitHub Actions runs it automatically on every push and PR.
 
 ## License
 
