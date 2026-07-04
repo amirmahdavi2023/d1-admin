@@ -56,6 +56,9 @@ export default {
           const body = await request.json().catch(() => ({}));
           const sql = (body.sql || "").trim();
           if (!sql) return json({ error: "Empty query." }, 400);
+          if (hasMultipleStatements(sql)) {
+            return json({ error: "Multiple statements are not supported — run one at a time." }, 400);
+          }
 
           const started = Date.now();
           const res = await env.DB.prepare(sql).all();
@@ -88,6 +91,33 @@ function json(obj, status = 200) {
     status,
     headers: { "content-type": "application/json; charset=utf-8" },
   });
+}
+
+// True if sql contains more than one statement.
+// Skips string literals ('..'), quoted identifiers (".."),
+// line comments (--) and block comments (/* */).
+function hasMultipleStatements(sql) {
+  const s = sql;
+  let mode = null; // null | 'sq' | 'dq' | 'line' | 'block'
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i], d = s[i + 1];
+    if (mode === "sq") {
+      if (c === "'") { if (d === "'") i++; else mode = null; }
+    } else if (mode === "dq") {
+      if (c === '"') { if (d === '"') i++; else mode = null; }
+    } else if (mode === "line") {
+      if (c === "\n") mode = null;
+    } else if (mode === "block") {
+      if (c === "*" && d === "/") { i++; mode = null; }
+    } else {
+      if (c === "'") mode = "sq";
+      else if (c === '"') mode = "dq";
+      else if (c === "-" && d === "-") mode = "line";
+      else if (c === "/" && d === "*") mode = "block";
+      else if (c === ";" && s.slice(i + 1).replace(/[;\s]/g, "").length > 0) return true;
+    }
+  }
+  return false;
 }
 
 // Quote an SQLite identifier safely: "name" with internal quotes doubled.
