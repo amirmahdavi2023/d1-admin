@@ -25,14 +25,14 @@ export default {
       if (!env.ADMIN_TOKEN) {
         return json({ error: "Setup incomplete: add a secret named ADMIN_TOKEN in Settings → Variables." }, 500);
       }
-      if (!env.DB) {
+      if (!env.DB) {env
         return json({ error: "Setup incomplete: bind a D1 database as DB in Settings → Bindings." }, 500);
       }
 
       // Auth
       const auth = request.headers.get("Authorization") || "";
       const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-      if (!token || !timingSafeEqual(token, env.ADMIN_TOKEN)) {
+      if (!token || !timingSafeEqual(token, .ADMIN_TOKEN)) {
         return json({ error: "Unauthorized" }, 401);
       }
 
@@ -94,11 +94,14 @@ function json(obj, status = 200) {
 }
 
 // True if sql contains more than one statement.
-// Skips string literals ('..'), quoted identifiers (".."),
-// line comments (--) and block comments (/* */).
+// Semicolons inside string literals ('..'), quoted identifiers (".."),
+// line comments (--) and block comments (/* */) don't count.
+// A trailing semicolon is allowed, even when followed by comments
+// or whitespace (`SELECT 1; -- done` is one statement).
 function hasMultipleStatements(sql) {
   const s = sql;
-  let mode = null; // null | 'sq' | 'dq' | 'line' | 'block'
+  let mode = null;   // null | 'sq' | 'dq' | 'line' | 'block'
+  let ended = false; // saw a statement-terminating semicolon
   for (let i = 0; i < s.length; i++) {
     const c = s[i], d = s[i + 1];
     if (mode === "sq") {
@@ -109,16 +112,23 @@ function hasMultipleStatements(sql) {
       if (c === "\n") mode = null;
     } else if (mode === "block") {
       if (c === "*" && d === "/") { i++; mode = null; }
-    } else {
+    } else if (c === "-" && d === "-") {
+      mode = "line"; i++;
+    } else if (c === "/" && d === "*") {
+      mode = "block"; i++;
+    } else if (c === ";") {
+      ended = true;
+    } else if (!/\s/.test(c)) {
+      if (ended) return true; // real content after a completed statement
       if (c === "'") mode = "sq";
       else if (c === '"') mode = "dq";
-      else if (c === "-" && d === "-") mode = "line";
-      else if (c === "/" && d === "*") mode = "block";
-      else if (c === ";" && s.slice(i + 1).replace(/[;\s]/g, "").length > 0) return true;
     }
   }
   return false;
 }
+
+// Exported for tests (see test.mjs); has no effect on the Worker runtime.
+export { hasMultipleStatements };
 
 // Quote an SQLite identifier safely: "name" with internal quotes doubled.
 function quoteIdent(name) {
