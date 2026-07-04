@@ -25,14 +25,14 @@ export default {
       if (!env.ADMIN_TOKEN) {
         return json({ error: "Setup incomplete: add a secret named ADMIN_TOKEN in Settings → Variables." }, 500);
       }
-      if (!env.DB) {env
+      if (!env.DB) {
         return json({ error: "Setup incomplete: bind a D1 database as DB in Settings → Bindings." }, 500);
       }
 
       // Auth
       const auth = request.headers.get("Authorization") || "";
       const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-      if (!token || !timingSafeEqual(token, .ADMIN_TOKEN)) {
+      if (!token || !timingSafeEqual(token, env.ADMIN_TOKEN)) {
         return json({ error: "Unauthorized" }, 401);
       }
 
