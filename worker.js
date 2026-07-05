@@ -56,12 +56,16 @@ export default {
           const body = await request.json().catch(() => ({}));
           const sql = (body.sql || "").trim();
           if (!sql) return json({ error: "Empty query." }, 400);
-          if (hasMultipleStatements(sql)) {
+          const stmt = analyzeStatement(sql);
+          if (stmt.multiple) {
             return json({ error: "Multiple statements are not supported — run one at a time." }, 400);
           }
+          // D1 errors on anything after the terminating semicolon (even a
+          // comment), so send only the statement itself.
+          const cleanSql = stmt.end === null ? sql : sql.slice(0, stmt.end);
 
           const started = Date.now();
-          const res = await env.DB.prepare(sql).all();
+          const res = await env.DB.prepare(cleanSql).all();
           const elapsed = Date.now() - started;
 
           return json({
@@ -93,15 +97,16 @@ function json(obj, status = 200) {
   });
 }
 
-// True if sql contains more than one statement.
+// Scan sql and report:
+//   multiple — true if it contains more than one statement
+//   end      — index of the statement-terminating semicolon (null if none)
 // Semicolons inside string literals ('..'), quoted identifiers (".."),
-// line comments (--) and block comments (/* */) don't count.
-// A trailing semicolon is allowed, even when followed by comments
-// or whitespace (`SELECT 1; -- done` is one statement).
-function hasMultipleStatements(sql) {
+// line comments (--) and block comments (/* */) don't count. A trailing
+// semicolon followed only by whitespace/comments/semicolons is allowed.
+function analyzeStatement(sql) {
   const s = sql;
-  let mode = null;   // null | 'sq' | 'dq' | 'line' | 'block'
-  let ended = false; // saw a statement-terminating semicolon
+  let mode = null;  // null | 'sq' | 'dq' | 'line' | 'block'
+  let end = null;   // index of the first real semicolon
   for (let i = 0; i < s.length; i++) {
     const c = s[i], d = s[i + 1];
     if (mode === "sq") {
@@ -117,18 +122,22 @@ function hasMultipleStatements(sql) {
     } else if (c === "/" && d === "*") {
       mode = "block"; i++;
     } else if (c === ";") {
-      ended = true;
+      if (end === null) end = i;
     } else if (!/\s/.test(c)) {
-      if (ended) return true; // real content after a completed statement
+      if (end !== null) return { multiple: true, end };
       if (c === "'") mode = "sq";
       else if (c === '"') mode = "dq";
     }
   }
-  return false;
+  return { multiple: false, end };
+}
+
+function hasMultipleStatements(sql) {
+  return analyzeStatement(sql).multiple;
 }
 
 // Exported for tests (see test.mjs); has no effect on the Worker runtime.
-export { hasMultipleStatements };
+export { hasMultipleStatements, analyzeStatement };
 
 // Quote an SQLite identifier safely: "name" with internal quotes doubled.
 function quoteIdent(name) {
