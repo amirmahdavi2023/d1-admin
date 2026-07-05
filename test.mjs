@@ -45,3 +45,33 @@ if (failures) {
   process.exit(1);
 }
 console.log(`All ${cases.length} tests passed`);
+
+// --- Trimming: what actually gets sent to D1 ---
+import { analyzeStatement } from "./worker.js";
+
+const trimCases = [
+  // [input, what D1 should receive]
+  ["SELECT 1; -- test", "SELECT 1"],
+  ["SELECT 1;", "SELECT 1"],
+  ["SELECT 1; /* done */", "SELECT 1"],
+  ["SELECT 1;;  ;", "SELECT 1"],
+  ["SELECT 1", "SELECT 1"],
+  ["SELECT 'a;b'; -- ok", "SELECT 'a;b'"],
+  ["SELECT 1 -- no semicolon", "SELECT 1 -- no semicolon"],
+];
+
+let trimFailures = 0;
+for (const [sql, want] of trimCases) {
+  const a = analyzeStatement(sql);
+  const got = a.end === null ? sql : sql.slice(0, a.end);
+  if (a.multiple || got !== want) {
+    trimFailures++;
+    console.error(`FAIL trim ${JSON.stringify(sql)} → ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
+  }
+}
+
+if (trimFailures) {
+  console.error(`\n${trimFailures}/${trimCases.length} trim tests failed`);
+  process.exit(1);
+}
+console.log(`All ${trimCases.length} trim tests passed`);
