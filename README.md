@@ -64,3 +64,10 @@ GitHub Actions runs it automatically on every push and PR.
 ## License
 
 MIT
+
+
+## ⭐ Support
+
+If D1 Admin saved you time, a star helps other Cloudflare developers find it.
+
+**[→ Star this repo](https://github.com/amirmahdavi2023/d1-admin)**
