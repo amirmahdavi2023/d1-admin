@@ -22,6 +22,7 @@ Your data never touches a third-party service: the panel runs as a Worker inside
 
 - Browse all tables and views, tap to preview (`LIMIT 100`)
 - Run any SQL statement — reads and writes — with timing and row counts
+- Export query results to CSV or JSON — quoting handled, UTF-8 BOM so Excel/Sheets open non-Latin data cleanly
 - Mobile-first UI that's actually pleasant on a small screen
 - Token auth with constant-time comparison; token stored only in your browser
 - Rejects multi-statement input with a clear error instead of D1's silent truncation — and does it correctly: semicolons inside string literals, quoted identifiers, and comments don't trip it, and a trailing `;` (even followed by a comment) is fine
