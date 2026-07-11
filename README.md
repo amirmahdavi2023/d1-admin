@@ -46,7 +46,7 @@ That's the whole install. Steps 1–5 work fine from a phone browser.
 - Multi-statement input (`SELECT 1; DROP TABLE …`) is rejected server-side with an explicit error. Note that D1 itself would only run the first statement and silently drop the rest — the check here exists so you find out instead of assuming everything ran.
 - For extra protection, put the Worker behind [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/) (free for up to 50 users).
 
-## Limitations (v1)
+## Limitations 
 
 - One SQL statement per run (D1 `prepare().all()` semantics)
 - Table preview is capped at 100 rows — use `LIMIT`/`OFFSET` for paging
