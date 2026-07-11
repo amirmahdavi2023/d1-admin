@@ -50,7 +50,7 @@ That's the whole install. Steps 1–5 work fine from a phone browser.
 
 - One SQL statement per run (D1 `prepare().all()` semantics)
 - Table preview is capped at 100 rows — use `LIMIT`/`OFFSET` for paging
-- No schema editor yet — see issues for the roadmap
+- No schema editor — use SQL directly, that's the point of the tool
 
 ## Development
 
