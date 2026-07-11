@@ -292,6 +292,8 @@ const HTML = `<!doctype html>
       <textarea id="sql" spellcheck="false" placeholder="SELECT * FROM users LIMIT 50;"></textarea>
       <div class="row">
         <button class="primary" id="run">Run query</button>
+        <button id="exportCsv" style="display:none" title="Download current results as CSV">CSV</button>
+        <button id="exportJson" style="display:none" title="Download current results as JSON">JSON</button>
         <span class="hint">Ctrl+Enter to run &middot; one statement at a time</span>
       </div>
     </section>
@@ -303,6 +305,7 @@ const HTML = `<!doctype html>
 <script>
 (function () {
   var token = localStorage.getItem("d1_admin_token") || "";
+  var lastRows = null; // rows from the most recent successful query (for export)
   var $ = function (id) { return document.getElementById(id); };
 
   function api(path, opts) {
@@ -334,6 +337,8 @@ const HTML = `<!doctype html>
   function renderResults(data) {
     var box = $("results");
     var rows = data.results;
+    lastRows = rows.length ? rows : null;
+    toggleExport();
     var m = data.meta;
     var parts = [];
     if (rows.length) parts.push(rows.length + " row" + (rows.length === 1 ? "" : "s"));
@@ -364,11 +369,65 @@ const HTML = `<!doctype html>
     box.innerHTML = html;
   }
 
+  // ---- Export (CSV / JSON of the current result) ----
+
+  function toggleExport() {
+    var show = lastRows ? "" : "none";
+    $("exportCsv").style.display = show;
+    $("exportJson").style.display = show;
+  }
+
+  function stamp() {
+    var d = new Date();
+    function p(n) { return (n < 10 ? "0" : "") + n; }
+    return "" + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) +
+      "-" + p(d.getHours()) + p(d.getMinutes());
+  }
+
+  function download(name, mime, text) {
+    var blob = new Blob([text], { type: mime });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  }
+
+  // Quote a CSV cell: wrap in "" when it contains comma/quote/newline,
+  // double any internal quotes. NULL becomes an empty cell.
+  function csvCell(v) {
+    if (v === null || v === undefined) return "";
+    var s = String(v);
+    if (/[",\\n\\r]/.test(s)) s = '"' + s.replace(/"/g, '""') + '"';
+    return s;
+  }
+
+  $("exportJson").onclick = function () {
+    if (!lastRows) return;
+    download("d1-export-" + stamp() + ".json", "application/json",
+      JSON.stringify(lastRows, null, 2));
+  };
+
+  $("exportCsv").onclick = function () {
+    if (!lastRows) return;
+    var cols = Object.keys(lastRows[0]);
+    var lines = [cols.map(csvCell).join(",")];
+    lastRows.forEach(function (r) {
+      lines.push(cols.map(function (c) { return csvCell(r[c]); }).join(","));
+    });
+    // BOM so Excel/Sheets detect UTF-8 (Persian etc. stays intact)
+    download("d1-export-" + stamp() + ".csv", "text/csv;charset=utf-8",
+      "\\uFEFF" + lines.join("\\r\\n"));
+  };
+
   function runQuery(sql) {
     setStatus("Running\\u2026");
     api("/api/query", { method: "POST", body: JSON.stringify({ sql: sql }) })
       .then(renderResults)
       .catch(function (e) {
+        lastRows = null;
+        toggleExport();
         $("results").innerHTML = '<div class="empty">Query failed.</div>';
         setStatus(e.message, true);
       });
