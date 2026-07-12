@@ -64,18 +64,39 @@ export default {
           // comment), so send only the statement itself.
           const cleanSql = stmt.end === null ? sql : sql.slice(0, stmt.end);
 
+          // Row cap: an accidental SELECT on a big table would otherwise
+          // load every row into Worker memory. Row-returning statements are
+          // wrapped with LIMIT cap+1 — the extra row tells us the result
+          // was truncated. The client can re-run with allowFull:true.
+          const ROW_CAP = 10000;
+          const kw = firstKeyword(cleanSql);
+          const cappable = kw === "SELECT" || kw === "WITH" || kw === "VALUES";
+          const capped = cappable && body.allowFull !== true;
+          const execSql = capped
+            ? "SELECT * FROM (" + cleanSql + ") LIMIT " + (ROW_CAP + 1)
+            : cleanSql;
+
           const started = Date.now();
-          const res = await env.DB.prepare(cleanSql).all();
+          const res = await env.DB.prepare(execSql).all();
           const elapsed = Date.now() - started;
 
+          let rows = res.results || [];
+          let truncated = false;
+          if (capped && rows.length > ROW_CAP) {
+            rows = rows.slice(0, ROW_CAP);
+            truncated = true;
+          }
+
           return json({
-            results: res.results || [],
+            results: rows,
             meta: {
               duration_ms: elapsed,
               rows_read: res.meta?.rows_read ?? null,
               rows_written: res.meta?.rows_written ?? null,
               changes: res.meta?.changes ?? null,
               last_row_id: res.meta?.last_row_id ?? null,
+              truncated: truncated,
+              row_cap: ROW_CAP,
             },
           });
         }
@@ -134,6 +155,31 @@ function analyzeStatement(sql) {
 
 function hasMultipleStatements(sql) {
   return analyzeStatement(sql).multiple;
+}
+
+// First SQL keyword of a statement, skipping leading whitespace and
+// comments. Used to decide whether a query returns rows (SELECT/WITH/
+// VALUES) and can safely be wrapped with a row cap.
+function firstKeyword(sql) {
+  const s = sql;
+  let i = 0;
+  while (i < s.length) {
+    const c = s[i], d = s[i + 1];
+    if (/\s/.test(c)) { i++; continue; }
+    if (c === "-" && d === "-") {
+      while (i < s.length && s[i] !== "\n") i++;
+      continue;
+    }
+    if (c === "/" && d === "*") {
+      i += 2;
+      while (i < s.length && !(s[i] === "*" && s[i + 1] === "/")) i++;
+      i += 2;
+      continue;
+    }
+    break;
+  }
+  const m = s.slice(i).match(/^[A-Za-z]+/);
+  return m ? m[0].toUpperCase() : "";
 }
 
 // Exported for tests (see test.mjs); has no effect on the Worker runtime.
@@ -256,6 +302,15 @@ const HTML = `<!doctype html>
   tr:hover td { background: #1b1e24; }
   td.null { color: var(--muted); font-style: italic; }
   .empty { padding: 40px; color: var(--muted); text-align: center; }
+  .truncNote {
+    padding: 10px 14px; margin-bottom: 10px; font-size: 13px;
+    background: rgba(246,130,31,.12); border: 1px solid var(--accent);
+    border-radius: 6px; color: var(--text);
+  }
+  .truncNote button {
+    background: none; border: none; padding: 0; cursor: pointer;
+    color: var(--accent); text-decoration: underline; font: inherit;
+  }
 
   /* Mobile */
   @media (max-width: 720px) {
@@ -306,6 +361,7 @@ const HTML = `<!doctype html>
 (function () {
   var token = localStorage.getItem("d1_admin_token") || "";
   var lastRows = null; // rows from the most recent successful query (for export)
+  var lastSql = "";    // SQL of the most recent query (for the "run full" retry)
   var $ = function (id) { return document.getElementById(id); };
 
   function api(path, opts) {
@@ -352,7 +408,14 @@ const HTML = `<!doctype html>
       return;
     }
     var cols = Object.keys(rows[0]);
-    var html = "<table><thead><tr>";
+    var html = "";
+    if (m.truncated) {
+      html += '<div class="truncNote">Showing first ' + m.row_cap +
+        ' rows \\u2014 the result is larger. ' +
+        '<button type="button" id="runFull">Run without limit</button> ' +
+        'or add your own LIMIT/OFFSET to page through.</div>';
+    }
+    html += "<table><thead><tr>";
     cols.forEach(function (c) { html += "<th>" + esc(c) + "</th>"; });
     html += "</tr></thead><tbody>";
     rows.forEach(function (r) {
@@ -367,6 +430,12 @@ const HTML = `<!doctype html>
     });
     html += "</tbody></table>";
     box.innerHTML = html;
+    var rf = document.getElementById("runFull");
+    if (rf) rf.onclick = function () {
+      if (confirm("Run the full query with no row cap?\\n\\nA very large result can exhaust the Worker's memory and fail.")) {
+        runQuery(lastSql, true);
+      }
+    };
   }
 
   // ---- Export (CSV / JSON of the current result) ----
@@ -421,9 +490,10 @@ const HTML = `<!doctype html>
       "\\uFEFF" + lines.join("\\r\\n"));
   };
 
-  function runQuery(sql) {
+  function runQuery(sql, allowFull) {
+    lastSql = sql;
     setStatus("Running\\u2026");
-    api("/api/query", { method: "POST", body: JSON.stringify({ sql: sql }) })
+    api("/api/query", { method: "POST", body: JSON.stringify({ sql: sql, allowFull: !!allowFull }) })
       .then(renderResults)
       .catch(function (e) {
         lastRows = null;
@@ -481,11 +551,30 @@ const HTML = `<!doctype html>
     location.reload();
   };
 
-  $("run").onclick = function () { runQuery($("sql").value.trim()); };
+  // Warn before statements that can silently destroy data: DROP anything,
+  // or DELETE/UPDATE with no WHERE clause. A seatbelt, not a lock.
+  function destructiveWarning(sql) {
+    var s = sql.replace(/--[^\\n]*/g, " ").replace(/\\/\\*[\\s\\S]*?\\*\\//g, " ").trim();
+    var kw = (s.match(/^[A-Za-z]+/) || [""])[0].toUpperCase();
+    if (kw === "DROP") return "This will permanently DROP a table/index/view.";
+    if ((kw === "DELETE" || kw === "UPDATE") && !/\\bwhere\\b/i.test(s))
+      return "This " + kw + " has no WHERE clause \\u2014 it will affect EVERY row.";
+    return null;
+  }
+
+  function guardedRun() {
+    var sql = $("sql").value.trim();
+    if (!sql) return;
+    var warn = destructiveWarning(sql);
+    if (warn && !confirm(warn + "\\n\\nRun anyway?")) return;
+    runQuery(sql);
+  }
+
+  $("run").onclick = guardedRun;
   $("sql").addEventListener("keydown", function (ev) {
     if ((ev.ctrlKey || ev.metaKey) && ev.key === "Enter") {
       ev.preventDefault();
-      runQuery($("sql").value.trim());
+      guardedRun();
     }
   });
 
