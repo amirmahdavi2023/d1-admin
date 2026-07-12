@@ -28,6 +28,8 @@ Your data never touches a third-party service: the panel runs as a Worker inside
 - Rejects multi-statement input with a clear error instead of D1's silent truncation — and does it correctly: semicolons inside string literals, quoted identifiers, and comments don't trip it, and a trailing `;` (even followed by a comment) is fine
 - Zero dependencies, zero build step, one file of readable JavaScript
 - The tricky part (SQL statement detection) is covered by [tests](test.mjs) that run in CI on every push
+- Results are capped at 10,000 rows by default, with a one-click "run without limit" override
+- Confirmation prompt before DROP, and DELETE/UPDATE without a WHERE clause
 
 ## Setup (2 minutes, entirely in the dashboard)
 
